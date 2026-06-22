@@ -10,7 +10,7 @@ export { Side, OrderType, TimeInForce, StpMode, MarginMode } from './types/commo
 export type { ClientOptions, ExchangeClientOptions, Eip712Domain, SystemConfig } from './types/config.js';
 
 // Types - Market
-export type { Market, MarketConfig, Orderbook, OrderbookLevel, Trade, Candle, FundingRate } from './types/market.js';
+export type { Market, MarketConfig, Orderbook, OrderbookLevel, Trade, Candle, CandleResolution, FundingRate } from './types/market.js';
 
 // Types - Account
 export type { Balance, Position, FundingPayment, Transfer, RealizedPnl } from './types/account.js';

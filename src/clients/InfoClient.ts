@@ -1,10 +1,58 @@
 import { HttpClient } from '../core/HttpClient.js';
 import { DEFAULT_BASE_URL } from '../utils/constants.js';
 import type { ClientOptions, SystemConfig, Eip712Domain } from '../types/config.js';
-import type { Market, Orderbook, Trade, Candle, FundingRate } from '../types/market.js';
+import type { Market, Orderbook, Trade, Candle, CandleResolution, FundingRate } from '../types/market.js';
 import type { Balance, Position, FundingPayment, Transfer, RealizedPnl } from '../types/account.js';
 import type { OpenOrder, OrderHistoryEntry, Fill } from '../types/order.js';
 import type { SessionKeyStatus, SignerInfo, NonceState } from '../types/auth.js';
+
+// Bar duration in nanoseconds for each natively-served resolution.
+const CANDLE_INTERVAL_NS: Record<string, string> = {
+  '1': '60000000000',
+  '5': '300000000000',
+  '15': '900000000000',
+  '60': '3600000000000',
+  '1D': '86400000000000',
+  '1W': '604800000000000',
+};
+
+// Resolutions the API does not serve natively: fetch a base interval and
+// aggregate client-side (matches the production RISEx datafeed).
+const CANDLE_BASE_RESOLUTION: Record<string, string> = { '30': '15', '2H': '60', '4H': '60', '8H': '60' };
+const CANDLE_AGGREGATION_FACTOR: Record<string, number> = { '30': 2, '2H': 2, '4H': 4, '8H': 8 };
+
+/** Combine consecutive candles into groups of `factor` (open=first, close=last, high=max, low=min, volume=sum). */
+/**
+ * Aggregate base candles into `targetNs`-sized bars, grouped by EPOCH-ALIGNED
+ * time bucket (not array index), so output bars land on standard boundaries
+ * regardless of where the fetch window starts. Each candle's `time` is the
+ * bucket's open boundary; open=first, close=last, high=max, low=min, volume=sum.
+ */
+function aggregateCandles(candles: Candle[], targetNs: bigint): Candle[] {
+  const buckets = new Map<bigint, Candle[]>();
+  for (const c of candles) {
+    const key = BigInt(c.time) - (BigInt(c.time) % targetNs);
+    const group = buckets.get(key);
+    if (group) group.push(c);
+    else buckets.set(key, [c]);
+  }
+  return [...buckets.keys()]
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((key) => {
+      const group = buckets.get(key)!; // candles arrive in ascending time order
+      const first = group[0];
+      const last = group[group.length - 1];
+      return {
+        ...first,
+        time: key.toString(),
+        open: first.open,
+        high: String(Math.max(...group.map((c) => parseFloat(c.high)))),
+        low: String(Math.min(...group.map((c) => parseFloat(c.low)))),
+        close: last.close,
+        volume: String(group.reduce((sum, c) => sum + parseFloat(c.volume), 0)),
+      };
+    });
+}
 
 export class InfoClient {
   protected readonly http: HttpClient;
@@ -55,12 +103,35 @@ export class InfoClient {
     return data.trades ?? (data as unknown as Trade[]);
   }
 
-  async getCandles(marketId: number, resolution: string, from?: number, to?: number): Promise<Candle[]> {
-    let path = `/v1/markets/trading-view-data?market_id=${marketId}&resolution=${resolution}`;
-    if (from) path += `&from=${from}`;
-    if (to) path += `&to=${to}`;
-    const data = await this.http.get<{ candles?: Candle[] }>(path);
-    return data.candles ?? (data as unknown as Candle[]);
+  /**
+   * Fetch OHLCV candles. `resolution` is a TradingView-style code; `from`/`to`
+   * are unix-second bounds (optional). `1, 5, 15, 60, 1D, 1W` are served
+   * natively; `30, 2H, 4H, 8H` are aggregated client-side from a base interval,
+   * matching the production RISEx app.
+   *
+   * Note: the API expects `interval` as a nanosecond bar-duration (not a
+   * `resolution` string), and `from`/`to` as unix nanoseconds — this method
+   * handles that conversion.
+   */
+  async getCandles(
+    marketId: number,
+    resolution: CandleResolution,
+    from?: number,
+    to?: number,
+  ): Promise<Candle[]> {
+    const factor = CANDLE_AGGREGATION_FACTOR[resolution] ?? 1;
+    const baseResolution = CANDLE_BASE_RESOLUTION[resolution] ?? resolution;
+    const intervalNs = CANDLE_INTERVAL_NS[baseResolution];
+    if (!intervalNs) throw new Error(`Unsupported candle resolution: ${resolution}`);
+
+    let path = `/v1/trading-view-data?market_id=${marketId}&interval=${intervalNs}`;
+    if (from !== undefined) path += `&from=${from}000000000`; // seconds → nanoseconds
+    if (to !== undefined) path += `&to=${to}000000000`;
+    const data = await this.http.get<{ data?: Candle[] }>(path);
+    const candles = data.data ?? (data as unknown as Candle[]);
+    if (factor <= 1) return candles;
+    const targetNs = BigInt(intervalNs) * BigInt(factor); // epoch-aligned bucket size
+    return aggregateCandles(candles, targetNs);
   }
 
   async getFundingRateHistory(marketId: number, limit = 50): Promise<FundingRate[]> {

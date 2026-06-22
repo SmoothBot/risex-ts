@@ -43,7 +43,8 @@ export interface Trade {
 }
 
 export interface Candle {
-  timestamp: string;
+  /** Bar open time as a unix-nanosecond string (the API field is `time`). */
+  time: string;
   open: string;
   high: string;
   low: string;
@@ -51,6 +52,13 @@ export interface Candle {
   volume: string;
   [key: string]: unknown;
 }
+
+/**
+ * Candle resolutions supported by `InfoClient.getCandles`, in TradingView style.
+ * `1, 5, 15, 60, 1D, 1W` are served natively by the API; `30, 2H, 4H, 8H` are
+ * aggregated client-side from a base interval (matching the production app).
+ */
+export type CandleResolution = '1' | '5' | '15' | '30' | '60' | '2H' | '4H' | '8H' | '1D' | '1W';
 
 export interface FundingRate {
   market_id: string;
