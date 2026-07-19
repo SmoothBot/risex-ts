@@ -7,7 +7,7 @@ import type { Eip712Domain } from '../types/config.js';
 /**
  * Convert a hex signature string to base64.
  */
-function hexToBase64(hex: string): string {
+export function hexToBase64(hex: string): string {
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
   const bytes = Buffer.from(clean, 'hex');
   return bytes.toString('base64');

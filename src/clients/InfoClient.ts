@@ -3,7 +3,7 @@ import { DEFAULT_BASE_URL } from '../utils/constants.js';
 import type { ClientOptions, SystemConfig, Eip712Domain } from '../types/config.js';
 import type { Market, Orderbook, Trade, Candle, CandleResolution, FundingRate } from '../types/market.js';
 import type { Balance, Position, FundingPayment, Transfer, RealizedPnl } from '../types/account.js';
-import type { OpenOrder, OrderHistoryEntry, Fill } from '../types/order.js';
+import type { OpenOrder, OrderHistoryEntry, Fill, TpslOrder } from '../types/order.js';
 import type { SessionKeyStatus, SignerInfo, NonceState } from '../types/auth.js';
 
 // Bar duration in nanoseconds for each natively-served resolution.
@@ -166,6 +166,13 @@ export class InfoClient {
     let path = `/v1/orders/open?account=${account}`;
     if (marketId !== undefined) path += `&market_id=${marketId}`;
     const data = await this.http.get<{ orders: OpenOrder[] }>(path);
+    return data.orders ?? [];
+  }
+
+  async getOpenTpslOrders(account: string): Promise<TpslOrder[]> {
+    const data = await this.http.get<{ orders: TpslOrder[] }>(
+      `/v1/orders/tpsl?account=${account}&statuses=TPSL_ORDER_STATUS_ACCEPTED`
+    );
     return data.orders ?? [];
   }
 

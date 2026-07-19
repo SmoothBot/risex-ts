@@ -1,11 +1,12 @@
 import { ethers } from 'ethers';
 import { InfoClient } from './InfoClient.js';
-import { createPermitParams } from '../signing/permit.js';
+import { createPermitParams, hexToBase64 } from '../signing/permit.js';
 import { createRegisterSignerSignatures } from '../signing/signer.js';
 import { encodeOrder, encodeCancelOrder, encodeCancelAll, encodeLeverage, encodeMarginMode, encodeIsolatedMargin } from '../signing/encoder.js';
+import { PERMIT_SINGLE_TYPES, PLACE_TPSL_TYPES, CANCEL_TPSL_TYPES } from '../signing/domain.js';
 import { Side, OrderType, TimeInForce, StpMode, MarginMode } from '../types/common.js';
 import type { ExchangeClientOptions, Eip712Domain } from '../types/config.js';
-import type { OrderParams, CancelParams, OrderResponse, CancelResponse, CancelAllResponse } from '../types/order.js';
+import type { OrderParams, CancelParams, OrderResponse, CancelResponse, CancelAllResponse, ApprovePermitSingleParams, PlaceTpslOrderParams, CancelTpslOrderParams } from '../types/order.js';
 import type { PermitParams, NonceState, RegisterSignerResult } from '../types/auth.js';
 
 export class ExchangeClient {
@@ -138,6 +139,53 @@ export class ExchangeClient {
     });
   }
 
+  // ── TPSL Authentication ───────────────────────────────────
+
+  /**
+   * Approves a budget for the operator hub to execute TPSL orders on your behalf.
+   */
+  async approvePermitSingle(params: ApprovePermitSingleParams): Promise<unknown> {
+    this.assertInit();
+    this.assertAccountKey();
+    
+    const sysConfig = await this.info.getSystemConfig();
+    const operatorHub = sysConfig.addresses?.operator_hub as string | undefined;
+    if (!operatorHub) throw new Error('OperatorHub address not found in system config');
+
+    const nonceState = params.nonce ?? await this.getNonceState();
+    const budget = BigInt(Math.ceil(params.budgetUsd)) * 10n ** 18n; // WAD
+    const allowanceExpiry = Math.floor(Date.now() / 1000) + (params.allowanceExpirySeconds ?? (30 * 24 * 3600 - 3600));
+    const nonceBitmapIndex = nonceState.current_bitmap_index;
+
+    const signatureHex = await this.accountWallet!.signTypedData(
+      {
+        name: this.domain.name,
+        version: this.domain.version,
+        chainId: this.domain.chainId,
+        verifyingContract: this.domain.verifyingContract,
+      },
+      PERMIT_SINGLE_TYPES,
+      {
+        account: this.account,
+        operator: operatorHub,
+        budget,
+        allowanceExpiry,
+        nonceAnchor: Number(nonceState.nonce_anchor),
+        nonceBitmap: nonceBitmapIndex,
+      }
+    );
+
+    return this.info['http'].post('/v1/auth/approve-single', {
+      account: this.account,
+      operator: operatorHub,
+      budget: budget.toString(),
+      allowance_expiry: allowanceExpiry,
+      nonce_anchor: nonceState.nonce_anchor,
+      nonce_bitmap_index: nonceBitmapIndex,
+      signature: hexToBase64(signatureHex),
+    });
+  }
+
   // ── Orders ──────────────────────────────────────────────
 
   private async createPermit(hash: string, nonce?: NonceState): Promise<PermitParams> {
@@ -205,6 +253,84 @@ export class ExchangeClient {
     return this.info['http'].post<CancelAllResponse>('/v1/orders/cancel-all', {
       market_id: marketId,
       permit,
+    });
+  }
+
+  // ── TPSL Orders ─────────────────────────────────────────
+
+  async placeTpslOrder(params: PlaceTpslOrderParams): Promise<OrderResponse> {
+    this.assertInit();
+    const deadline = Math.floor(Date.now() / 1000) + (params.deadlineSeconds ?? 3600);
+    
+    const message = {
+      account: this.account,
+      marketId: params.market_id,
+      side: params.side === 'BUY' ? 0 : 1,
+      size: params.size,
+      stopType: params.stop_type === 'TAKE_PROFIT' ? 0 : 1,
+      stopPrice: params.stop_price,
+      limitPrice: params.limit_price,
+      orderType: params.order_type,
+      stopPriceOption: params.stop_price_option,
+      tif: params.tif === 'GTC' ? 0 : 1, // fallback mapping
+      deadline,
+    };
+
+    const signatureHex = await this.signerWallet.signTypedData(
+      {
+        name: this.domain.name,
+        version: this.domain.version,
+        chainId: this.domain.chainId,
+        verifyingContract: this.domain.verifyingContract,
+      },
+      PLACE_TPSL_TYPES,
+      message
+    );
+
+    return this.info['http'].post<OrderResponse>('/v1/orders/tpsl', {
+      account: this.account,
+      market_id: String(params.market_id),
+      side: params.side,
+      size: params.size,
+      stop_type: params.stop_type,
+      order_type: params.order_type,
+      stop_price: params.stop_price,
+      limit_price: params.limit_price,
+      stop_price_option: params.stop_price_option,
+      tif: params.tif,
+      signer: this.signer,
+      signature: hexToBase64(signatureHex),
+      deadline,
+    });
+  }
+
+  async cancelTpslOrder(params: CancelTpslOrderParams): Promise<CancelResponse> {
+    this.assertInit();
+    const deadline = Math.floor(Date.now() / 1000) + (params.deadlineSeconds ?? 3600);
+
+    const message = {
+      account: this.account,
+      orderId: params.order_id,
+      deadline
+    };
+
+    const signatureHex = await this.signerWallet.signTypedData(
+      {
+        name: this.domain.name,
+        version: this.domain.version,
+        chainId: this.domain.chainId,
+        verifyingContract: this.domain.verifyingContract,
+      },
+      CANCEL_TPSL_TYPES,
+      message
+    );
+
+    return this.info['http'].post<CancelResponse>('/v1/orders/tpsl/cancel', {
+      order_id: params.order_id,
+      account: this.account,
+      signer: this.signer,
+      signature: hexToBase64(signatureHex),
+      deadline
     });
   }
 

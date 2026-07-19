@@ -40,3 +40,38 @@ export const VERIFY_WITNESS_TYPES: Record<string, ethers.TypedDataField[]> = {
 };
 
 export const REGISTER_SIGNER_MESSAGE = 'Registering signer for RISEx';
+
+export const PERMIT_SINGLE_TYPES: Record<string, ethers.TypedDataField[]> = {
+  PermitSingle: [
+    { name: 'account', type: 'address' },
+    { name: 'operator', type: 'address' },
+    { name: 'budget', type: 'uint96' },
+    { name: 'allowanceExpiry', type: 'uint32' },
+    { name: 'nonceAnchor', type: 'uint48' },
+    { name: 'nonceBitmap', type: 'uint8' },
+  ],
+};
+
+export const PLACE_TPSL_TYPES: Record<string, ethers.TypedDataField[]> = {
+  PlaceTpslOrder: [
+    { name: 'account', type: 'address' },
+    { name: 'marketId', type: 'uint64' },
+    { name: 'side', type: 'uint8' },
+    { name: 'size', type: 'string' },
+    { name: 'stopType', type: 'uint8' },
+    { name: 'stopPrice', type: 'string' },
+    { name: 'limitPrice', type: 'string' },
+    { name: 'orderType', type: 'uint8' },
+    { name: 'stopPriceOption', type: 'uint8' },
+    { name: 'tif', type: 'uint8' },
+    { name: 'deadline', type: 'uint32' },
+  ],
+};
+
+export const CANCEL_TPSL_TYPES: Record<string, ethers.TypedDataField[]> = {
+  CancelTpslOrder: [
+    { name: 'account', type: 'address' },
+    { name: 'orderId', type: 'string' },
+    { name: 'deadline', type: 'uint32' }
+  ]
+};

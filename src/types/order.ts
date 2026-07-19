@@ -36,6 +36,45 @@ export interface TpSlParams {
   [key: string]: unknown;
 }
 
+export interface ApprovePermitSingleParams {
+  budgetUsd: number;
+  allowanceExpirySeconds?: number;
+  nonce?: NonceState;
+}
+
+export interface PlaceTpslOrderParams {
+  market_id: number;
+  side: 'BUY' | 'SELL';
+  size: string;
+  stop_type: 'TAKE_PROFIT' | 'STOP_LOSS';
+  order_type: number;
+  stop_price: string;
+  limit_price: string;
+  stop_price_option: number;
+  tif: string;
+  nonce?: NonceState;
+  deadlineSeconds?: number;
+}
+
+export interface CancelTpslOrderParams {
+  order_id: string;
+  nonce?: NonceState;
+  deadlineSeconds?: number;
+}
+
+export interface TpslOrder {
+  order_id: string;
+  market_id: number;
+  account: string;
+  side: string;
+  size: string;
+  stop_type: string;
+  stop_price: string;
+  limit_price: string;
+  status: string;
+  [key: string]: unknown;
+}
+
 export interface OrderResponse {
   order_id: string;
   sc_order_id: string;
